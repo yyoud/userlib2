@@ -19,3 +19,8 @@ To get started with the user handling system, follow these steps:
    ```bash
    git clone https://github.com/yourusername/user-handling.git
    cd user-handling
+
+```python
+class User:
+   def __init__(self):
+      pass
