@@ -1,0 +1,119 @@
+main:
+"""
+======================================================
+User Handling and Security Code
+======================================================
+
+
+This code implements user handling and security features, providing tools for secure user authentication and access
+control.
+It includes classes and functions for encoding, hashing, key generation, and other security-related tasks.
+
+classes:
+---------
+1. SecurityUtils:
+   - Provides methods for encoding random strings and generating cryptographic keys.
+   - Offers functions for hashing data and creating indexed operator keys.
+
+2. User:
+   - Represents a user with attributes such as username, login, password, and ID.
+   - Implements methods for password hashing, updating passwords, and accessing user information.
+   - Supports user registration and storage.
+   - Includes administrative functions for secure information retrieval.
+
+Examples of Usage:
+------------------
+Here are some examples of how to use the provided functionality:
+
+- Encoding a random string:
+  >>> encoded = SecurityMethods.random_string()
+
+- Creating an indexed operator key:
+  >>> index_key = SecurityMethods.index_operator(11, True, False)
+
+- Registering a new user:
+  >>> new_user = User
+  >>> new_user.register()
+
+- Accessing private user information:
+  >>> user1 = User("my username", "example@gmail.com", "mypass123@#_L")
+  >>> user1.private_information("password")
+
+- Generating hashes:
+>>> user2 = User("username", "example2@gmail.com", "mypass123@#_L")
+>>> user2.hash_password(user2.hashing_constant)
+
+Security and Usage Notes:
+-------------------------
+- Ensure that proper input validation and error handling are implemented when using these functions.
+- Consider using more secure hashing algorithms for password storage, such as bcrypt or Argon2.
+- Adapt and extend this code as needed to meet the security requirements of your application.
+
+
+For comprehensive security and reliability, consider additional testing, review, and consultation with security experts.
+
+For more details on each class and function, refer to their respective documentation within the code.
+"""
+
+SecurityMethods
+"""
+
+    A class that provides methods for generating cryptographic and cryogenic keys.
+
+    This class contains methods to generate random strings, index keys, generate random integers, and create keys of
+    various types with different security levels. It also includes a password policy check.
+    =======================================================================================
+
+    Methods:
+        ```
+        1. `random_string()`: Generates a random string of 24 characters consisting of letters, numbers,
+        and special characters.
+
+        2. `index_operator(operator: int, index: bool, index1: bool)`: Generates an indexed key for administrative
+        purposes based on an operator value and two indexing booleans.
+
+        3. `gen_operator()`: Generates a random integer for general purposes.
+
+        4. `generate_key(key_type, security_level=1, **kwargs)`: Generates keys of different types;
+        (str, int, bool, bool+str), with optional parameters for key length.
+
+        5. `password_policy(password: str)`: Checks if a password complies with a password policy requiring a minimum
+        length, the presence of numbers, and special characters.
+
+        ```
+
+    Example:
+        ```
+         Generate a random string:
+
+        >>> random_str = SecurityMethods.random_string()
+
+         Generate an indexed key:
+
+        >>> indexed_key = SecurityMethods.index_operator(11, True, False)
+
+         Generate a random integer:
+
+        >>> random_int = SecurityMethods.gen_operator()
+
+         Generate a string key with a specific security level and length:
+
+        >>> str_key = SecurityMethods.generate_key("str", 4, min_length=32, max_length=64)
+
+         Check if a password meets the policy:
+
+        >>> password_meets_policy = SecurityMethods.password_policy("myP@ssw0rd_")
+        ```
+
+    """
+
+User.hash_password
+        """
+        a function which is used to hash a user's password quickly and securely,
+        not necessary all the time, especially if you have a costume hash function since
+        the hashing method is 'sha3_384' by default.
+        you can use the 'costume_hash' function to costume hash an object or a user.
+        :param hashing_constant: is an argument that is changeable for admin convenience.
+         it is a constant to base the hash on.
+        :return:  secure salted and complete hash for the password
+        """
