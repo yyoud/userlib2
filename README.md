@@ -20,7 +20,14 @@ To get started with the user handling system, follow these steps:
    git clone https://github.com/yourusername/user-handling.git
    cd user-handling
 
+## Example
+
 ```python
-class User:
-   def __init__(self):
-      pass
+from Userlib.userlib import User
+
+def register_100_users():
+    for i in range(100):
+        username = input("username: ")
+        email = input("email: ")
+        password = input("enter password: )
+        yield User(username, email, password)
