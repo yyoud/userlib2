@@ -24,5 +24,4 @@ class BullShitError(_Error):
 
 
 if __name__ == "__main__":
-    raise _Error("clone")
-
+    raise BullShitError("clone")

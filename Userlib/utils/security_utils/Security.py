@@ -6,9 +6,11 @@ from base64 import b64encode, b64decode, b32encode, a85encode
 import base58
 from Crypto.Cipher import AES, ChaCha20
 from Crypto.Util.Padding import pad
-from typing import Literal, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer
+
+__all__ = ["Security", "Knox", "GeneralMethods", "refine_to_bytes"]
 
 # default and globals
 DEFAULT_COST = 65536  # default iterating cost for PBKDF2
@@ -17,10 +19,32 @@ VALID_PREFIX = Literal['a', 'b', 'c']
 VALID_ENCRYPTION_OPERATION = Literal["encrypt", "decrypt"]
 VALID_ENCRYPTION_TYPE = Literal[1, 2]
 DEFAULT_PREFIX = 'a'
+ReadableBufferNonExtensive = Union[bytes, bytearray, memoryview]
+
+default_params = [
+    DEFAULT_COST, DEFAULT_SALT_SIZE,
+    VALID_PREFIX,
+    VALID_ENCRYPTION_OPERATION, VALID_ENCRYPTION_TYPE,
+    DEFAULT_PREFIX,
+]
+
+__all__.append(default_params)
+
+
+def refine_to_bytes(s: ReadableBufferNonExtensive) -> bytes:
+    if isinstance(s, memoryview):
+        return s.tobytes()
+    elif isinstance(s, bytearray):
+        return bytes(s)
+    else:
+        return s
 
 
 class Security:
-
+    """
+    things to do with security things. \n
+    **STILL UNDER DEVELOPMENT**
+    """
     # not finished
     @staticmethod
     def formatted_key(
@@ -62,11 +86,11 @@ class Security:
             # step3: encrypt key_cg, both prefixes using encryptbyprefix, with arg 'key_b'.   TO-DO:   done
             # prefix_rl implemented, token implemented, key_b implemented,
             # example: sk=<b64 key_b>#c2#<encrypted key_cg>
-            _encrypted_token = Security.encryptbynumberform(token, key_cg, prefix_et, nonce)
+            _encrypted_token = Knox.encryptbynumberform(token, key_cg, prefix_et, nonce)
             fkey = pbkdf2_hmac(hash_name, _encrypted_token, b'', cost)  # key_b finalized
 
-            encrypted_cryptographic_key = Security.encryptbyprefix(key_cg, prefix_b, key_b)
-            encrypted_prefixes = Security.encryptbyprefix(prefix_b + str(prefix_et) + str(key_b), prefix_b, key_b)
+            encrypted_cryptographic_key = Knox.encryptbyprefix(key_cg, prefix_b, key_b)
+            encrypted_prefixes = Knox.encryptbyprefix(prefix_b + str(prefix_et) + str(key_b), prefix_b, key_b)
 
             return f"sk={b64encode(fkey).decode()}#{encrypted_prefixes}#{encrypted_cryptographic_key}"
         elif prefix_rl == 'mk':
@@ -89,20 +113,31 @@ class Security:
         if key.startswith('sk='):
             pkey = key.split("#")
             for i in ['a', 'b', 'c']:
-                if Security.encryptbyprefix(pkey[1], i, operation='decrypt')[0] in possible_prefixes:
+                if Knox.encryptbyprefix(pkey[1], i, operation='decrypt')[0] in possible_prefixes:
                     prefix_b = None  # noqa  idk please help
         pass
 
     @staticmethod
     def gen_key_domain(master_key: str, duplicates: int):  # noqa
-        if not master_key.startswith(("sk=", "mk=", "ns=")):
-            raise ValueError("Invalid _key")
+        if not master_key.startswith(("sk=", "ns=")):
+            raise ValueError("Key needs to be of type mk")
+        elif master_key.startswith("mk="):
+            pass
 
+        else:
+            raise ValueError("Invalid key")
+
+
+class Knox:
+    """
+    things to do with encryption
+    """
     # -------------------------------------------------------
     #             bitwise encryption things
     # -------------------------------------------------------
     @staticmethod
-    def xor_encrypt_decrypt(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+    def kexe(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+        """stands for key embedded xor encryption"""
         if isinstance(data, str):
             data = data.encode('utf-8')
         if operation == 'encrypt':
@@ -121,7 +156,8 @@ class Security:
             raise ValueError("Invalid operation")
 
     @staticmethod
-    def addmod_encrypt_decrypt(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+    def keame(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+        """stands for key embedded addmod encryption"""
         if isinstance(data, str):
             data = data.encode('utf-8')
         if operation == 'encrypt':
@@ -146,7 +182,8 @@ class Security:
             raise ValueError("Invalid operation")
 
     @staticmethod
-    def not_encrypt_decrypt(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+    def kene(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
+        """stands for key embedded not encryption"""
         if isinstance(data, str):
             data = data.encode('utf-8')
 
@@ -171,8 +208,9 @@ class Security:
         else:
             raise ValueError("Invalid operation")
 
-    @staticmethod
-    def encryptbyprefix(data, prefix: VALID_PREFIX | str, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt') -> str | tuple[str, int]:
+    @classmethod
+    def encryptbyprefix(cls, data, prefix: VALID_PREFIX | str, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt') -> str | tuple[str, int]:
+        inst = cls
         # prefix parameter also uses str to avoid type errors caused by expecting a Literal type.
         if not isinstance(data, (str, bytes)):
             raise TypeError(f"Invalid data type: {type(data)}")
@@ -187,22 +225,22 @@ class Security:
 
             # Encryption logic
             if prefix == 'a':
-                return Security.xor_encrypt_decrypt(data, key, operation=operation)
+                return inst.kexe(data, key, operation=operation)
             elif prefix == 'b':
-                return Security.addmod_encrypt_decrypt(data, key, operation=operation)
+                return inst.keame(data, key, operation=operation)
             elif prefix == 'c':
-                return Security.not_encrypt_decrypt(data, key, operation=operation)
+                return inst.kene(data, key, operation=operation)
         elif operation == 'decrypt':
             if key is not None:
                 raise ValueError("Key should not be provided for decryption, it will be extracted from the data.")
 
             # Decryption logic
             if prefix == 'a':
-                return Security.xor_encrypt_decrypt(data, operation=operation)
+                return inst.kexe(data, operation=operation)
             elif prefix == 'b':
-                return Security.addmod_encrypt_decrypt(data, operation=operation)
+                return inst.keame(data, operation=operation)
             elif prefix == 'c':
-                return Security.not_encrypt_decrypt(data, operation=operation)
+                return inst.kene(data, operation=operation)
         else:
             raise ValueError(f"Invalid operation: {operation}")
 
@@ -240,8 +278,8 @@ class Security:
     # -------------------------------------------------------
 
     @staticmethod
-    def circular_bit_rotate(data: bytes, shift_amount: int, direction: str = 'left') -> bytes:
-        def rotate_byte(byte: int, shift: int, _direction: str) -> int:
+    def cbr(data: bytes, shift_amount: int, direction: str = 'left') -> bytes:
+        def rotate(byte: int, shift: int, _direction: str) -> int:
             if _direction == 'left':
                 return ((byte << shift) | (byte >> (8 - shift))) & 0xFF
             elif _direction == 'right':
@@ -249,7 +287,7 @@ class Security:
             else:
                 raise ValueError("Direction must be 'left' or 'right'")
 
-        return bytes(rotate_byte(byte, shift_amount, direction) for byte in data)
+        return bytes(rotate(byte, shift_amount, direction) for byte in data)
 
     @staticmethod
     def reverse_bytes(byte_string: bytes):
@@ -266,23 +304,21 @@ class Security:
         return bytes(reversed_bytes)
 
     @staticmethod
-    def maj2(hex_list):
+    def maj(hex_list):
         n = len(hex_list)
         xor_result = 0
-
-        # Iterate over all pairs of elements in the list
         for i in range(n):
             for j in range(i + 1, n):
                 # Compute AND operation for each pair
                 and_result = hex_list[i] & hex_list[j]
                 # XOR the result into the final result
                 xor_result ^= and_result
-
-        # Mask to ensure result is 32-bit
         return xor_result & 0xFFFFFFFF
 
+
+class GeneralMethods:
     # -------------------------------------------------------
-    #                 _key and hash things
+    #                 key and hash things
     # -------------------------------------------------------
 
     # the difference between this and the formatted key_b is that this is purly random.
@@ -328,25 +364,35 @@ class Security:
             raise ValueError(f"Invalid key_b type '{key_type}'")
 
     @staticmethod
-    def costume_hash(
-            password: ReadableBuffer,
+    def customizable_hash(
+            data: ReadableBufferNonExtensive,
             _type: type,
             hash_name: str,
             encrypting_method: VALID_ENCRYPTION_TYPE | None = None,
             nonce: bytes = None,
             salt: str | ReadableBuffer | None = None):
-        hash_obj = new(hash_name)
-        password_bytes = password.encode() if isinstance(password, str) else password
+        """
+
+        :param data:
+        :param _type:
+        :param hash_name:
+        :param encrypting_method: encrypting with `Security.encryptbynumberform`
+        :param nonce:
+        :param salt: salt, if the algorithm is 'bcrypt' it will be ignored.
+        :return:
+        """
+        sterilized_data = refine_to_bytes(data)
         if not salt:
             salt = b''
         else:
             salt = salt.encode() if isinstance(salt, str) else salt
-        salted_password = password_bytes + salt if salt else password_bytes
+        salted_password = sterilized_data + salt if salt else sterilized_data
 
         # Encrypting the password (if specified)
         if encrypting_method:
             key = token_bytes(16)
-            salted_password = Security.encryptbynumberform(salted_password, key, encrypting_method, nonce)
+            salted_password = Knox.encryptbynumberform(salted_password, key, encrypting_method, nonce)
+        hash_obj = new(hash_name)
         hash_obj.update(salted_password)
         hashed_result = hash_obj.digest()
 
