@@ -1,5 +1,14 @@
+#!/usr/bin/python3
+# under development
+
 from secrets import choice
 from random import randrange
+from Crypto.PublicKey import RSA  # noqa
+from typing import Literal
+from Userlib.utils.security_utils.bitwise import monobyte_xor
+from uuid import uuid5, NAMESPACE_DNS
+
+T_key_format = Literal["sk", "mk", "ns"]
 
 
 class ChecksumKeys:
@@ -125,6 +134,42 @@ class ChecksumKeys:
                 raise ValueError(f"Unknown operation: {op}")
 
         return True
+
+
+class MasterKey:
+    """
+    idea:
+    every regular key, will include this format: \n
+    ns=<digested key of the uid>$ \n
+    every master key: \n
+    mk=<private domain key>$<number of regular keys in domain>
+    \n
+    \n
+    where the number of regular keys in each domain has to be predefined.
+    """
+
+    def __init__(self, name: str, key_format: T_key_format, key: bytes):  # noqa i am a nigga. if you see this, fuck you.
+        self.sk = ...
+        self.pk = ...  # private and public key placeholders
+        integer = int.from_bytes(key, "big") % 256
+        integer_2 = (len(name)**2) % 256
+        self.uid = uuid5(NAMESPACE_DNS, monobyte_xor(name.encode()+key, (
+                int.from_bytes(monobyte_xor(key, integer), "big") ^
+                int.from_bytes(monobyte_xor(name.encode(), integer_2), "big")) % 256).decode('latin-1'))
+
+        # ok so I need to implement the rsa and all these
+
+    def _digest_key(self):
+        # idk what to do honestly
+        pass
+
+    def __str__(self):
+
+        return f"mk="
+
+
+class KeyDomains:
+    pass
 
 
 # Example usage

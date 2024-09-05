@@ -1,3 +1,6 @@
+#!/usr/bin/python3
+# all rights reserved to yyoud 2024. (c)
+# TODO: in Security finish formatted key functions
 from __future__ import annotations
 from hashlib import (new, sha3_256, pbkdf2_hmac)
 from secrets import choice, token_bytes
@@ -5,12 +8,12 @@ from string import ascii_letters, punctuation, digits
 from base64 import b64encode, b64decode, b32encode, a85encode
 import base58
 from Crypto.Cipher import AES, ChaCha20
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad, unpad
 from typing import Literal, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer
 
-__all__ = ["Security", "Knox", "GeneralMethods", "refine_to_bytes"]
+__all__ = ["Security", "ToolKit", "GeneralMethods", "refine_to_bytes"]
 
 # default and globals
 DEFAULT_COST = 65536  # default iterating cost for PBKDF2
@@ -19,7 +22,7 @@ VALID_PREFIX = Literal['a', 'b', 'c']
 VALID_ENCRYPTION_OPERATION = Literal["encrypt", "decrypt"]
 VALID_ENCRYPTION_TYPE = Literal[1, 2]
 DEFAULT_PREFIX = 'a'
-ReadableBufferNonExtensive = Union[bytes, bytearray, memoryview]
+Buffer = Union[bytes, bytearray, memoryview]
 
 default_params = [
     DEFAULT_COST, DEFAULT_SALT_SIZE,
@@ -31,7 +34,7 @@ default_params = [
 __all__.append(default_params)
 
 
-def refine_to_bytes(s: ReadableBufferNonExtensive) -> bytes:
+def refine_to_bytes(s: Buffer) -> bytes:
     if isinstance(s, memoryview):
         return s.tobytes()
     elif isinstance(s, bytearray):
@@ -48,12 +51,12 @@ class Security:
     # not finished
     @staticmethod
     def formatted_key(
-                      token: str | bytes | bytearray | memoryview,
+                      token: str | Buffer,
                       key_b: int,
                       key_cg: bytes,
                       nonce: bytes,
                       prefix_rl: Literal["sk", "mk", "ns"],
-                      prefix_b: VALID_PREFIX = DEFAULT_PREFIX,  # noqa
+                      prefix_b: VALID_PREFIX = DEFAULT_PREFIX,
                       prefix_et: VALID_ENCRYPTION_TYPE = 2,
                       hash_name: str = 'sha512',
                       cost=DEFAULT_COST,):
@@ -86,14 +89,15 @@ class Security:
             # step3: encrypt key_cg, both prefixes using encryptbyprefix, with arg 'key_b'.   TO-DO:   done
             # prefix_rl implemented, token implemented, key_b implemented,
             # example: sk=<b64 key_b>#c2#<encrypted key_cg>
-            _encrypted_token = Knox.encryptbynumberform(token, key_cg, prefix_et, nonce)
+            _encrypted_token = ToolKit.encryptbynumberform(token, key_cg, prefix_et, nonce)
             fkey = pbkdf2_hmac(hash_name, _encrypted_token, b'', cost)  # key_b finalized
 
-            encrypted_cryptographic_key = Knox.encryptbyprefix(key_cg, prefix_b, key_b)
-            encrypted_prefixes = Knox.encryptbyprefix(prefix_b + str(prefix_et) + str(key_b), prefix_b, key_b)
+            encrypted_cryptographic_key = ToolKit.encryptbyprefix(key_cg, prefix_b, key_b)
+            encrypted_prefixes = ToolKit.encryptbyprefix(prefix_b + str(prefix_et) + str(key_b), prefix_b, key_b)
 
             return f"sk={b64encode(fkey).decode()}#{encrypted_prefixes}#{encrypted_cryptographic_key}"
         elif prefix_rl == 'mk':
+            # **UNDER DEVELOPMENT**
             # create a secure checksum algorithm that can generate new checksum formats, randomly
             # create a sample id_ using the checksum, and put it in a format of:
             # 'mk=<checksum hex>#<address>
@@ -113,7 +117,7 @@ class Security:
         if key.startswith('sk='):
             pkey = key.split("#")
             for i in ['a', 'b', 'c']:
-                if Knox.encryptbyprefix(pkey[1], i, operation='decrypt')[0] in possible_prefixes:
+                if ToolKit.encryptbyprefix(pkey[1], i, operation='decrypt')[0] in possible_prefixes:
                     prefix_b = None  # noqa  idk please help
         pass
 
@@ -128,9 +132,11 @@ class Security:
             raise ValueError("Invalid key")
 
 
-class Knox:
+class ToolKit:
     """
-    things to do with encryption
+    things to do with bitwise encryption. idk how to call this class, but it isn't in the
+    ``bitwise.py`` file,
+    because im too lazy to change it all in all the files importing this
     """
     # -------------------------------------------------------
     #             bitwise encryption things
@@ -244,9 +250,14 @@ class Knox:
         else:
             raise ValueError(f"Invalid operation: {operation}")
 
+    # what's up with the decryption, huh?
+    # no worries imma do it
     @staticmethod
-    def encryptbynumberform(data: bytes | bytearray | memoryview, key: bytes | bytearray | memoryview, number: VALID_ENCRYPTION_TYPE, nonce: bytes = None):
+    def encryptbynumberform(data: Buffer, key: Buffer,
+                            number: VALID_ENCRYPTION_TYPE, nonce: bytes = None,
+                            operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
         """
+        :param operation: operation
         :param data: data to encrypt
         :param key: encryption key_b
         :param nonce: nonce
@@ -254,24 +265,29 @@ class Knox:
         :return: encrypted text in bytes
         """
         kkey = key
+        if isinstance(key, int):
+            raise TypeError("you mixed the key and prefix again")
         if not len(key) == 32:
             kkey = sha3_256(key).digest()
+
         if number == 1:
-            if len(nonce) < 16:
-                raise ValueError("Nonce should be 16 characters long")
-            elif len(nonce) > 16:
-                nonce = sha3_256(nonce).digest()[:16]
-            cipher = AES.new(kkey, AES.MODE_CBC, nonce)
-            encrypted_text = cipher.encrypt(pad(data, AES.block_size))
-            return encrypted_text
+            if len(nonce) != 16:
+                raise ValueError("Nonce must be 16 bytes")
+            if operation == 'encrypt':
+                plaintext = AES.new(kkey, AES.MODE_CBC, nonce).encrypt(pad(data, AES.block_size))
+                return plaintext
+            else:
+                plaintext = unpad(AES.new(kkey, AES.MODE_CBC, nonce).decrypt(data), AES.block_size)
+                return plaintext
         else:
-            if not len(nonce) < 12:
-                raise ValueError("Nonce should be 16 characters long")
-            elif len(nonce) > 12:
-                nonce = sha3_256(nonce).digest()[:12]
-            cipher = ChaCha20.new(key=kkey, nonce=nonce)
-            encrypted_text = cipher.encrypt(pad(data, ChaCha20.block_size))
-            return encrypted_text
+            if len(nonce) != 12:
+                raise ValueError("Nonce must be 12 bytes")
+            if operation == 'encrypt':
+                plaintext = ChaCha20.new(key=kkey, nonce=nonce).encrypt(pad(data, ChaCha20.block_size))
+                return plaintext
+            else:
+                plaintext = unpad(ChaCha20.new(key=kkey, nonce=nonce).decrypt(data), ChaCha20.block_size)
+                return plaintext
 
     # -------------------------------------------------------
     #              bitwise logical operations
@@ -290,7 +306,7 @@ class Knox:
         return bytes(rotate(byte, shift_amount, direction) for byte in data)
 
     @staticmethod
-    def reverse_bytes(byte_string: bytes):
+    def reverse(byte_string: bytes):
         """
         reverses bytes such as byte of 10100001 will be 10000101, mirrored basically
         """
@@ -305,6 +321,7 @@ class Knox:
 
     @staticmethod
     def maj(hex_list):
+        """average majority from array of 32 bit hexes"""
         n = len(hex_list)
         xor_result = 0
         for i in range(n):
@@ -363,9 +380,10 @@ class GeneralMethods:
         else:
             raise ValueError(f"Invalid key_b type '{key_type}'")
 
+    # imma delete it i think
     @staticmethod
     def customizable_hash(
-            data: ReadableBufferNonExtensive,
+            data: Buffer,
             _type: type,
             hash_name: str,
             encrypting_method: VALID_ENCRYPTION_TYPE | None = None,
@@ -391,7 +409,7 @@ class GeneralMethods:
         # Encrypting the password (if specified)
         if encrypting_method:
             key = token_bytes(16)
-            salted_password = Knox.encryptbynumberform(salted_password, key, encrypting_method, nonce)
+            salted_password = ToolKit.encryptbynumberform(salted_password, key, encrypting_method, nonce)
         hash_obj = new(hash_name)
         hash_obj.update(salted_password)
         hashed_result = hash_obj.digest()
@@ -404,3 +422,9 @@ class GeneralMethods:
             return hashed_result
         else:
             raise ValueError("Invalid type")
+
+
+if __name__ == "__main__":
+    x = ToolKit.encryptbynumberform(b'bro i swear imma quit im like a slave here', b'1234567890123456', 1, b'1234567890123456')
+    print(x.hex())
+    print(ToolKit.encryptbynumberform(x, b'1234567890123456', 1, b'1234567890123456', 'decrypt'))

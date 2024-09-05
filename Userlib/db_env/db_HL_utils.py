@@ -1,16 +1,22 @@
-# TODO: implement a user banning mechanism, unit test or manual test
-# TODO: implement security mechanism by ensuring a _key and a monobyte number for bitwise encryption
-# though the code is incomplete, it can function completely.
-# publish code on GitHub only when completed as to not need to update recently
-# README file in Userlib/README.md, includes all files.
+# TODO: implement a user banning mechanism, implement the quadbyte thing (on me dont do it),
+# manual to do so:
+# user banning by making another column in another table called 'user' or now
+# its a bool and it can be set to true or false. that's it for now basically for this file.
+# quadbyte on me again i have a system ok imma implement it by myself
+# also please implement the request denied thing in the ban mechanism so that if the ban is true the user
+# cant come back with the same email and stuff yk
+
 
 from __future__ import annotations
+
 import sqlite3 as sq
 from pathlib import Path
 from os import PathLike
+from hashlib import sha256
+from Userlib.utils.errors import RequestDenied  # noqa
 
 
-# Initialize the database and table
+# idk
 def _alter_tables():
     conn = sq.connect("databases/userf.db")
     cursor = conn.cursor()
@@ -19,11 +25,25 @@ def _alter_tables():
         username TEXT NOT NULL,
         email TEXT NOT NULL,
         password_hash TEXT,
-        idu INTEGER PRIMARY KEY
+        uid INTEGER PRIMARY KEY
         )
        """)
     conn.commit()
     conn.close()
+
+
+def _del_table():
+    conn = sq.connect("databases/userf.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    DROP TABLE users
+       """)
+    conn.commit()
+    conn.close()
+
+
+def create_db(name):
+    sq.connect(f'databases/{name}')
 
 
 class Database:
@@ -51,17 +71,17 @@ class Database:
         return Path(database).resolve()
 
     # tested
-    def add_user(self, username, email, hashed_password, idu):
+    def add_user(self, username, email, hashed_password, uid):
         """Add a new user to the database."""
         cn = sq.connect(self.db)
         crsr = cn.cursor()
-        crsr.execute(f"""INSERT INTO {self.table} (username, email, password_hash, idu) VALUES (?, ?, ?, ?)""",
-                     (username, email, hashed_password, idu))
+        crsr.execute(f"""INSERT INTO {self.table} (username, email, password_hash, uid) VALUES (?, ?, ?, ?)""",
+                     (username, email, hashed_password, uid))
         cn.commit()
         crsr.close()
         cn.close()
 
-    def get_user(self, identifier: str, method: str = 'idu'):
+    def get_user(self, identifier: str, method: str = 'uid'):
         """Returns user information based on the identifier and method."""
 
         cn = sq.connect(self.db)
@@ -71,12 +91,12 @@ class Database:
             crsr.execute(f"SELECT * FROM {self.table} WHERE username=?", (identifier,))
         elif method == 'email':
             crsr.execute(f"SELECT * FROM {self.table} WHERE email=?", (identifier,))
-        elif method == 'id_':
-            crsr.execute(f"SELECT * FROM {self.table} WHERE idu=?", (identifier,))
+        elif method == 'uid':
+            crsr.execute(f"SELECT * FROM {self.table} WHERE uid=?", (identifier,))
         else:
             crsr.close()
             cn.close()
-            raise ValueError("method is unsupported. please use 'username', 'email', or 'id_'.")
+            raise ValueError("method is unsupported. please use 'username', 'email', or 'uid'.")
 
         user = crsr.fetchone()
         crsr.close()
@@ -92,8 +112,8 @@ class Database:
             crsr.execute(f"DELETE FROM {self.table} WHERE username=?", (identifier,))
         elif method == 'email':
             crsr.execute(f"DELETE FROM {self.table} WHERE email=?", (identifier,))
-        elif method == 'id_':
-            crsr.execute(f"DELETE FROM {self.table} WHERE idu=?", (identifier,))
+        elif method == 'uid':
+            crsr.execute(f"DELETE FROM {self.table} WHERE uid=?", (identifier,))
         else:
             print("Invalid id_method. Use 'username', 'email', or 'id_'.")
             return
@@ -114,7 +134,7 @@ class Database:
         cn.close()
 
     # tested
-    def update_user(self, identifier: str | int, update: str, update_field: str, id_method='username'):
+    def update_user(self, identifier: str | int, update: str, update_field: str, id_method='uid'):
         """Updates a specified field of a user identified by `identifier`. ID cannot be updated."""
 
         # Connect to the database
@@ -143,11 +163,11 @@ class Database:
 
         elif id_method == 'id_':
             if update_field == 'username':
-                crsr.execute(f"UPDATE {self.table} SET username=? WHERE idu=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET username=? WHERE uid=?", (update, identifier))
             elif update_field == 'email':
-                crsr.execute(f"UPDATE {self.table} SET email=? WHERE idu=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET email=? WHERE uid=?", (update, identifier))
             elif update_field == 'password':
-                crsr.execute(f"UPDATE {self.table} SET password_hash=? WHERE idu=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET password_hash=? WHERE uid=?", (update, identifier))
             else:
                 raise ValueError("Invalid update field.")
 
@@ -165,16 +185,16 @@ class Database:
         x = crsr.execute("""SELECT * FROM users""")
         return x.fetchall()
 
-    # temporary
+    # temporary for testing
     @staticmethod
     def fetchall():
         return Database._fetchall()
 
 
 if __name__ == "__main__":
-    db1 = Database("databases/userf.db", "users")
+    db1 = Database("databases/userf.db", "users", sha256(b'').digest(), 234)
     # db1.add_user("niggauser_2", "example@example.comcom", "passpassword", 9)
+    # db1.add_user("user1", "user1email@email.com", "passypassword", 1)
     print(db1.get_user('user1'))
-    print(db1.update_user(9, 'passpassword4updated', 'password', 'id_'))
+    print(db1.update_user(1, 'user2', 'username', 'id_'))
     print(db1.fetchall())
-    print()

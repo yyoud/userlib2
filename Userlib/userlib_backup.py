@@ -31,7 +31,7 @@ def _alter_tables():
             username TEXT NOT NULL,
             email TEXT NOT NULL,
             password_hash TEXT,
-            idu INTEGER PRIMARY KEY
+            uid INTEGER PRIMARY KEY
             )
         """)
 
@@ -57,7 +57,7 @@ class Database:
                 raise ValueError(f"Email '{email}' already exists.")
 
             _cursor.execute("""
-                    INSERT INTO Users (username, email, password_hash, idu)
+                    INSERT INTO Users (username, email, password_hash, uid)
                     VALUES (?, ?, ?, ?)
                 """, (username, email, hashed_password, idu))
             _conn.commit()
@@ -81,7 +81,7 @@ class Database:
             _cursor = _conn.cursor()
             if method == 'username':
                 # Execute the query to fetch email password_hash and id_ from user table
-                _cursor.execute("SELECT email, password_hash, idu FROM Users WHERE username=?", identifier)
+                _cursor.execute("SELECT email, password_hash, uid FROM Users WHERE username=?", identifier)
                 # Fetch the result (only one row expected)
                 user = _cursor.fetchone()
                 _cursor.close()
@@ -90,7 +90,7 @@ class Database:
 
             elif method == 'email':
                 # Execute the query to fetch user information by email
-                _cursor.execute("SELECT username, password_hash, idu FROM Users WHERE email=?", identifier)
+                _cursor.execute("SELECT username, password_hash, uid FROM Users WHERE email=?", identifier)
                 # Fetch the result (only one row expected)
                 user = _cursor.fetchone()
                 _cursor.close()
@@ -99,7 +99,7 @@ class Database:
 
             elif method == 'id_':
                 # Execute the query to fetch user information by email
-                _cursor.execute("SELECT username, email, password_hash FROM Users WHERE idu=?", identifier)
+                _cursor.execute("SELECT username, email, password_hash FROM Users WHERE uid=?", identifier)
                 # Fetch the result (only one row expected)
                 user = _cursor.fetchone()
                 _cursor.close()
@@ -128,7 +128,7 @@ class Database:
                 """, identifier)
             elif method == 'id_':
                 crsr.execute("""
-                    DELETE FROM Users WHERE idu=?
+                    DELETE FROM Users WHERE uid=?
                 """, identifier)
 
         except sq.Error as e:
@@ -651,7 +651,7 @@ class Manager:
 
             # Use regular expressions to extract information
             pattern = r"(?P<hash>[a-fA-F0-9]+)\$(?P<len_key>\d+)(?P<prefix>[a-zA-Z]+)(?P<encrypted_cost>[a-zA-Z0-9]+)\$(?P<len_salt_size>\d+)~(?P<salt_size>\d+)\$(?P<encrypted_salt>[a-fA-F0-9]+)"
-            match = re.match(pattern, encoded_string)
+            match = re.match(r"(?P<hash>[a-fA-F0-9]+)\$(?P<len_key>\d+)(?P<prefix>[a-zA-Z]+)(?P<encrypted_cost>[a-zA-Z0-9]+)\$(?P<len_salt_size>\d+)~(?P<salt_size>\d+)\$(?P<encrypted_salt>[a-fA-F0-9]+)", encoded_string)
             if not match:
                 raise ValueError("Invalid format")
             info = match.groupdict()
