@@ -8,7 +8,7 @@ This repository contains a user handling system written in Python. The system in
 - Password hashing and verification
 - Unique user ID generation
 - Email validation
-- Customizable hashing algorithm
+- Strong kdf and hashing
 
 ## Getting Started
 
@@ -17,8 +17,8 @@ To get started with the user handling system, follow these steps:
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/yourusername/user-handling.git
-   cd user-handling
+   git clone https://github.com/yyoud/userlib2.git
+   cd userlib2
 
 ## Example
 
@@ -29,5 +29,9 @@ def register_100_users():
     for i in range(100):
         username = input("username: ")
         email = input("email: ")
-        password = input("enter password: )
+        password = input("enter password: ")
         yield User(username, email, password)
+```
+
+#### I am only a begginer, and i am still learning myself. a lot of code here is going to be bullshit, but i have to learn someway.
+#### Although the code is mainly for learning purposes, feel free to copy/change/distribute the code, i dont care.
