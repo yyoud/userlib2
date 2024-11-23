@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# all rights to yyoud
+# all rights to yyoud (c)
 
 import sys
 

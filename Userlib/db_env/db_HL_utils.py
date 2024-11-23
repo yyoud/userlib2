@@ -1,4 +1,4 @@
-# TODO: implement a user banning mechanism, implement the quadbyte thing (on me dont do it),
+# TODO: implement a user banning mechanism, implement the sixbyte thing (on me dont do it),
 # manual to do so:
 # user banning by making another column in another table called 'user' or now
 # its a bool and it can be set to true or false. that's it for now basically for this file.
@@ -13,47 +13,63 @@ import sqlite3 as sq
 from pathlib import Path
 from os import PathLike
 from hashlib import sha256
-from Userlib.utils.errors import RequestDenied  # noqa
+from Userlib.utils.errors import RequestDeniedException  # noqa
 
 
-# idk
 def _alter_tables():
-    conn = sq.connect("databases/userf.db")
+    conn = sq.connect(r"C:\Users\User\PycharmProjects\pythonProject3\Userlib\db_env\databases\userf.db")
     cursor = conn.cursor()
     cursor.execute("""
-    CREATE TABLE  users (
-        username TEXT NOT NULL,
-        email TEXT NOT NULL,
-        password_hash TEXT,
-        uid INTEGER PRIMARY KEY
-        )
-       """)
+    CREATE TABLE users (
+        username TEXT,
+        email TEXT UNIQUE,
+        password TEXT,
+        id TEXT UNIQUE,
+        banned BOOLEAN
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _second_alter_tables():
+    conn = sq.connect(r"C:\Users\User\PycharmProjects\pythonProject3\Userlib\db_env\databases\userf.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE users (
+        username TEXT,
+        email TEXT UNIQUE,
+        password TEXT,
+        id TEXT UNIQUE,
+        banned BOOLEAN,
+        logged_in BOOLEAN,
+    )
+    """)
     conn.commit()
     conn.close()
 
 
 def _del_table():
-    conn = sq.connect("databases/userf.db")
+    conn = sq.connect(r"C:\Users\User\PycharmProjects\pythonProject3\Userlib\db_env\databases\userf.db")
     cursor = conn.cursor()
-    cursor.execute("""
-    DROP TABLE users
-       """)
+    cursor.execute("DROP TABLE users")
     conn.commit()
     conn.close()
 
 
 def create_db(name):
-    sq.connect(f'databases/{name}')
+    sq.connect(rf'C:\Users\User\PycharmProjects\pythonProject3\Userlib\db_env\databases\{name}')
 
 
 class Database:
-    def __init__(self, database: str | bytes | PathLike[str] | PathLike[bytes], table_name: str, key: bytes | bytearray | memoryview, monobyte: int):
+    def __init__(self, database: str | bytes | PathLike[str] | PathLike[bytes], table_name: str,
+                 key: bytes | bytearray | memoryview, monobyte: int):
         self.table = table_name
         self.db = Database._resolve_path(database)
         if not self.db.suffix == '.db':
             raise ValueError("DB file must have a '.db' suffix")
         if not len(key) == 32:
-            raise ValueError("_key must be 32 bytes long")
+            raise ValueError("key must be 32 bytes long")
         if isinstance(key, memoryview):
             self.key = key.tobytes()
         elif isinstance(key, bytearray):
@@ -70,19 +86,34 @@ class Database:
             database = database.decode()
         return Path(database).resolve()
 
-    # tested
-    def add_user(self, username, email, hashed_password, uid):
+    def init_table(self, name: str):
+        cn = sq.connect(self.db)
+        crsr = cn.cursor()
+        crsr.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {name}(
+                username TEXT,
+                email TEXT UNIQUE,
+                password TEXT,
+                id TEXT UNIQUE,
+                banned BOOLEAN,
+            """)
+
+    def add_user(self, username, email, hashed_password, uid, banned):
         """Add a new user to the database."""
         cn = sq.connect(self.db)
         crsr = cn.cursor()
-        crsr.execute(f"""INSERT INTO {self.table} (username, email, password_hash, uid) VALUES (?, ?, ?, ?)""",
-                     (username, email, hashed_password, uid))
+        crsr.execute(f"INSERT INTO {self.table} (username, email, password, id, banned) VALUES (?, ?, ?, ?, ?)",
+                     (username, email, hashed_password, uid, banned))
         cn.commit()
         crsr.close()
         cn.close()
 
-    def get_user(self, identifier: str, method: str = 'uid'):
-        """Returns user information based on the identifier and method."""
+    def get_user(self, identifier: str, method: str = 'id') -> tuple[str, str, str, str, bool] | None:
+        """
+        Returns user information based on the identifier and method.
+        :return (username, email, hash, id, banned_status)
+        """
 
         cn = sq.connect(self.db)
         crsr = cn.cursor()
@@ -91,19 +122,19 @@ class Database:
             crsr.execute(f"SELECT * FROM {self.table} WHERE username=?", (identifier,))
         elif method == 'email':
             crsr.execute(f"SELECT * FROM {self.table} WHERE email=?", (identifier,))
-        elif method == 'uid':
-            crsr.execute(f"SELECT * FROM {self.table} WHERE uid=?", (identifier,))
+        elif method == 'id':
+            crsr.execute(f"SELECT * FROM {self.table} WHERE id=?", (identifier,))
         else:
             crsr.close()
             cn.close()
-            raise ValueError("method is unsupported. please use 'username', 'email', or 'uid'.")
+            raise ValueError("method is unsupported. please use 'username', 'email', or 'id'.")
 
         user = crsr.fetchone()
         crsr.close()
         cn.close()
         return user
 
-    def delete_user(self, identifier: str, method: str = 'username'):
+    def delete_user(self, identifier: str, method: str = 'id'):
         """Deletes a user from the database based on the identifier and method."""
         cn = sq.connect(self.db)
         crsr = cn.cursor()
@@ -112,19 +143,16 @@ class Database:
             crsr.execute(f"DELETE FROM {self.table} WHERE username=?", (identifier,))
         elif method == 'email':
             crsr.execute(f"DELETE FROM {self.table} WHERE email=?", (identifier,))
-        elif method == 'uid':
-            crsr.execute(f"DELETE FROM {self.table} WHERE uid=?", (identifier,))
+        elif method == 'id':
+            crsr.execute(f"DELETE FROM {self.table} WHERE id=?", (identifier,))
         else:
-            print("Invalid id_method. Use 'username', 'email', or 'id_'.")
+            print("Invalid id_method. Use 'username', 'email', or 'id'.")
             return
 
         cn.commit()
         crsr.close()
         cn.close()
 
-    # called 'clean' and not 'reset' as to not get confused with
-    # a function in 'db_env/DBConfig' to reset a database,
-    # and to not create a mix-up and potential errors
     def clean(self):
         """Deletes all records from the specified table."""
         cn = sq.connect(self.db)
@@ -133,41 +161,45 @@ class Database:
         cn.commit()
         cn.close()
 
-    # tested
-    def update_user(self, identifier: str | int, update: str, update_field: str, id_method='uid'):
-        """Updates a specified field of a user identified by `identifier`. ID cannot be updated."""
+    def update_user(self, identifier: str | int, update: str, update_field: str, id_method='id'):
+        """Updates a specified field of a user identified by `identifier`. Email cannot be updated."""
 
         # Connect to the database
         cn = sq.connect(self.db)
         crsr = cn.cursor()
 
+        if self.is_user_banned(identifier, id_method):
+            raise RequestDeniedException("This user is banned and cannot be modified.")
+
         if id_method == 'username':
-            if update_field == 'username':
-                raise ValueError("Username cannot be updated.")
-            elif update_field == 'email':
-                crsr.execute(f"UPDATE {self.table} SET email=? WHERE username=?", (update, identifier))
+            if update_field == 'email':
+                raise ValueError("Email cannot be updated.")
+            elif update_field == 'username':
+                crsr.execute(f"UPDATE {self.table} SET username=? WHERE username=?", (update, identifier))
             elif update_field == 'password':
-                crsr.execute(f"UPDATE {self.table} SET password_hash=? WHERE username=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET password=? WHERE username=?", (update, identifier))
+            elif update_field == 'banned':
+                crsr.execute(f"UPDATE {self.table} SET banned=? WHERE username=?", (update, identifier))
             else:
                 raise ValueError("Invalid update field.")
 
         elif id_method == 'email':
             if update_field == 'username':
-                raise ValueError("Email cannot be updated.")
-            elif update_field == 'email':
                 crsr.execute(f"UPDATE {self.table} SET username=? WHERE email=?", (update, identifier))
             elif update_field == 'password':
-                crsr.execute(f"UPDATE {self.table} SET password_hash=? WHERE email=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET password=? WHERE email=?", (update, identifier))
+            elif update_field == 'banned':
+                crsr.execute(f"UPDATE {self.table} SET banned=? WHERE email=?", (update, identifier))
             else:
                 raise ValueError("Invalid update field.")
 
-        elif id_method == 'id_':
+        elif id_method == 'id':
             if update_field == 'username':
-                crsr.execute(f"UPDATE {self.table} SET username=? WHERE uid=?", (update, identifier))
-            elif update_field == 'email':
-                crsr.execute(f"UPDATE {self.table} SET email=? WHERE uid=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET username=? WHERE id=?", (update, identifier))
             elif update_field == 'password':
-                crsr.execute(f"UPDATE {self.table} SET password_hash=? WHERE uid=?", (update, identifier))
+                crsr.execute(f"UPDATE {self.table} SET password=? WHERE id=?", (update, identifier))
+            elif update_field == 'banned':
+                crsr.execute(f"UPDATE {self.table} SET banned=? WHERE id=?", (update, identifier))
             else:
                 raise ValueError("Invalid update field.")
 
@@ -178,23 +210,47 @@ class Database:
         cn.commit()
         cn.close()
 
+    def is_user_banned(self, identifier: str, id_method: str) -> bool:
+        """Check if a user is banned based on their identifier."""
+        cn = sq.connect(self.db)
+        crsr = cn.cursor()
+
+        if id_method == 'username':
+            crsr.execute(f"SELECT banned FROM {self.table} WHERE username=?", (identifier,))
+        elif id_method == 'email':
+            crsr.execute(f"SELECT banned FROM {self.table} WHERE email=?", (identifier,))
+        elif id_method == 'id':
+            crsr.execute(f"SELECT banned FROM {self.table} WHERE id=?", (identifier,)
+                         )
+        else:
+            crsr.close()
+            cn.close()
+            raise ValueError("Invalid ID method.")
+
+        result = crsr.fetchone()
+        crsr.close()
+        cn.close()
+
+        return result[0] if result else False
+
     @staticmethod
     def _fetchall():
         cn = sq.connect("databases/userf.db")
         crsr = cn.cursor()
-        x = crsr.execute("""SELECT * FROM users""")
+        x = crsr.execute("SELECT * FROM users")
         return x.fetchall()
 
-    # temporary for testing
     @staticmethod
     def fetchall():
         return Database._fetchall()
 
 
 if __name__ == "__main__":
-    db1 = Database("databases/userf.db", "users", sha256(b'').digest(), 234)
-    # db1.add_user("niggauser_2", "example@example.comcom", "passpassword", 9)
-    # db1.add_user("user1", "user1email@email.com", "passypassword", 1)
-    print(db1.get_user('user1'))
-    print(db1.update_user(1, 'user2', 'username', 'id_'))
+    db1 = Database(r"C:\Users\User\PycharmProjects\pythonProject3\Userlib\db_env\databases\userf.db", "users", sha256(b'').digest(), 234)
+    db1.clean()
+    db1.add_user("niggauser_2", "example@example.comcom", "passpassword", "i7845344325bv465bn336745n53467n", False)
+    db1.add_user("user1", "user1email@email.com", "passypassword", "4356bn345nb34w56nw3456n34w65n3", False)
+    print(db1.get_user('user1', 'username'))
+
+    db1.update_user(1, 'user2', 'username', 'id')
     print(db1.fetchall())

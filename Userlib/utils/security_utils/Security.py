@@ -1,40 +1,45 @@
 #!/usr/bin/python3
 # all rights reserved to yyoud 2024. (c)
 # TODO: in Security finish formatted key functions
+# this is all shit btw I will be removing like half the code when I finish dealing with more important stuff.
 from __future__ import annotations
-from hashlib import (new, sha3_256, pbkdf2_hmac)
-from secrets import choice, token_bytes
-from string import ascii_letters, punctuation, digits
-from base64 import b64encode, b64decode, b32encode, a85encode
+import hmac
 import base58
+from os import urandom
+from random import Random
+from secrets import choice
 from Crypto.Cipher import AES, ChaCha20
 from Crypto.Util.Padding import pad, unpad
-from typing import Literal, TYPE_CHECKING, Union
-if TYPE_CHECKING:
-    from _typeshed import ReadableBuffer
+from typing import Literal, Union, Callable
+from hashlib import sha3_256, sha3_512, pbkdf2_hmac
+from string import ascii_letters, punctuation, digits
+from base64 import b64encode as b64e, b64decode as b64d, b32encode as b32e, a85encode as a85e
 
-__all__ = ["Security", "ToolKit", "GeneralMethods", "refine_to_bytes"]
+
+__all__ = ["generate_key", "force_bytes", "addmod_encryption", "NOT_encryption", "XOR_encryption",
+           "encryptbyformat", "encryptbyprefix", "ROT", "REV"]
+
 
 # default and globals
 DEFAULT_COST = 65536  # default iterating cost for PBKDF2
 DEFAULT_SALT_SIZE = 16
 VALID_PREFIX = Literal['a', 'b', 'c']
-VALID_ENCRYPTION_OPERATION = Literal["encrypt", "decrypt"]
+VALID_OPERATION = Literal["encrypt", "decrypt"]
 VALID_ENCRYPTION_TYPE = Literal[1, 2]
-DEFAULT_PREFIX = 'a'
 Buffer = Union[bytes, bytearray, memoryview]
+T_sb = tuple[int, int, int, int, int, int]
+
 
 default_params = [
     DEFAULT_COST, DEFAULT_SALT_SIZE,
     VALID_PREFIX,
-    VALID_ENCRYPTION_OPERATION, VALID_ENCRYPTION_TYPE,
-    DEFAULT_PREFIX,
+    VALID_OPERATION, VALID_ENCRYPTION_TYPE,
 ]
 
 __all__.append(default_params)
 
 
-def refine_to_bytes(s: Buffer) -> bytes:
+def force_bytes(s: Buffer) -> bytes:
     if isinstance(s, memoryview):
         return s.tobytes()
     elif isinstance(s, bytearray):
@@ -43,388 +48,389 @@ def refine_to_bytes(s: Buffer) -> bytes:
         return s
 
 
-class Security:
+class Key:
+    __domains: set[str] = set()
+
+    def __init__(self, domain: str, key: bytes, public_key: bytes):
+        # I'm thinking of making a block chaining thing for this so that it wouldn't be easy to temper with but idc
+        if domain in Key.__domains:
+            raise ValueError("Domain '%s' Already Taken." % domain)
+
+        if len(key) != 32:
+            raise ValueError("Key Must Be 32 Bytes Long.")
+        Key.__domains.add(domain)
+        self._publickey = sha3_256(public_key).digest()
+        self._domain = domain
+        self._mk = self._gen_mk(domain, key, self._publickey)
+        self._hashes: set[str] = set()
+        self._dkone: dict = {}
+        self._index = 0
+
+    __slots__ = "_mk", "_publickey", "_domain", "_hashes", "_index", "_dkone"
+
+    @staticmethod
+    def _gen_mk(domain: str, key: bytes, public_key: bytes):
+        return hmac.new(key, public_key, sha3_256).digest()+b'$~'+domain.encode()
+
+    @property
+    def public_key(self):
+        return self._publickey.hex()
+
+    @property
+    def domain(self):
+        return self._domain
+
+    def gen_key(self, key: bytes):
+        if self._gen_mk(self._domain, key, self._publickey) != self._mk:
+            raise ValueError("Invalid key.")
+        subkey = urandom(32)
+        k = hmac.new(subkey, self._publickey, sha3_256).digest()+b'$~'+self._domain.encode()+b'$~'+str(self._index).encode()
+        self._hashes.add(hmac.new(k, key, sha3_256).hexdigest())
+        self._dkone[hmac.new(k, key, sha3_256).hexdigest()] = k
+        self._index += 1
+        return k
+
+    def verify_key(self, subkey: bytes, key: bytes):
+        if len(subkey.split(b'$~')) != 3:
+            raise ValueError("Invalid Sub-Key.")
+        # if self._dkone.get(hmac.new(subkey, key, sha3_256).hexdigest(), "nigger") == subkey:
+        #     return True
+        if hmac.new(subkey, key, sha3_256).hexdigest() in self._hashes:
+            return True
+        return False
+
+    def del_subkey(self, key: bytes, subkey: bytes):
+        if self._gen_mk(self._domain, key, self._publickey) != self._mk:
+            raise ValueError("Invalid key.")
+        if self.verify_key(subkey, key):
+            self._hashes.remove(hmac.new(subkey, key, sha3_256).hexdigest())
+
+
+def XOR_encryption(data: bytes, key: bytes, iv: bytes = None, operation: str = 'encrypt') -> bytes:
+    if len(key) != 32:
+        raise ValueError("Invalid Key. Key must be 32 bytes.")
+    if operation == 'encrypt':
+        if iv and len(iv) != 16:
+            raise ValueError("IV Must Be 16 Bytes Long.")
+        iv = iv if iv else urandom(16)
+    else:
+        iv = data[:16]
+        data = data[16:]
+    padbyblocksize = lambda D, block_size: D + (b"\x80" + b'\x00' * (block_size - (len(D) % block_size) - 1))
+
+    def unpadbyblocksize(D: bytes, block_size: int) -> bytes:
+        if len(D) % block_size != 0:
+            raise ValueError("Incorrect Padding.")
+        padding_index = D.rfind(b'\x80')
+        if padding_index == -1:
+            return D
+        if D[padding_index + 1:] != b'\x00' * (len(D) - padding_index - 1):
+            raise ValueError("Invalid padding.")
+        return D[:padding_index]
+
+    dkey: Callable[[bytes, bytes, int], bytes] = \
+        lambda _iv, _key, i: hmac.new(_key, _iv + bytes([i]), sha3_256).digest()
+
+    if operation == 'encrypt':
+        padded_data: bytes = padbyblocksize(data, 32)
+    else:
+        padded_data = data
+
+    words: list[bytes] = [padded_data[i:i + 32] for i in range(0, len(padded_data), 32)]
+    fval = []
+
+    for i, word in enumerate(words):
+        xval = bytearray()
+        subkey = dkey(iv, key, i)
+        for j, b in enumerate(word):
+            xval.append(((~b) ^ subkey[j]) & 0xFF)
+        fval.append(bytes(xval))
+    result = b''.join(fval)
+    if operation == 'decrypt':
+        result = unpadbyblocksize(result, 32)
+    if operation == 'encrypt':
+        return iv + result
+    return result
+
+
+def addmod_encryption(data: bytes, key: bytes, operation: VALID_OPERATION = 'encrypt'):
+    """stands for key embedded addmod encryption"""
+    if operation == 'encrypt':
+        encrypted_bytes = bytes([(b + key[i]) % 256 for i, b in enumerate(data)])
+        return b64e(encrypted_bytes).decode()
+    elif operation == 'decrypt':
+        encrypted_bytes = b64d(data)
+        decrypted_data = bytes([(b - key[i]) % 256 for i, b in enumerate(encrypted_bytes)])
+        return decrypted_data.decode('utf-8')
+
+
+def NOT_encryption(data: bytes, key: bytes):
+    encrypted_bytes = bytes([((~b) ^ key[i % len(key)]) & 0xFF for i, b in enumerate(data)])
+    return encrypted_bytes
+
+
+def encryptbyprefix(data: bytes, prefix: VALID_PREFIX | str, key: bytes, operation: VALID_OPERATION = 'encrypt'):
+    # prefix parameter also uses str to avoid type errors caused by expecting a Literal type.
+    if isinstance(prefix, str):
+        if prefix not in ['a', 'b', 'c']:
+            raise ValueError(f"Invalid prefix.")
+
+    if prefix == 'a':
+        return XOR_encryption(data, key, operation=operation)
+    elif prefix == 'b':
+        return addmod_encryption(data, key, operation=operation)
+    elif prefix == 'c':
+        return NOT_encryption(data, key)
+
+
+def encryptbyformat(data: Buffer, key: Buffer,
+                    number: VALID_ENCRYPTION_TYPE | int, nonce: bytes = None,
+                    operation: VALID_OPERATION = 'encrypt'):
     """
-    things to do with security things. \n
-    **STILL UNDER DEVELOPMENT**
+    encrypt with aes or ChaCha20 based on number
+    :param operation: operation
+    :param data: data to encrypt
+    :param key: encryption key_b
+    :param nonce: nonce
+    :param number: encryption type: from 1, 2 translating to AES, ChaCha20 respectively
+    :return: encrypted text in bytes
     """
-    # not finished
-    @staticmethod
-    def formatted_key(
-                      token: str | Buffer,
-                      key_b: int,
-                      key_cg: bytes,
-                      nonce: bytes,
-                      prefix_rl: Literal["sk", "mk", "ns"],
-                      prefix_b: VALID_PREFIX = DEFAULT_PREFIX,
-                      prefix_et: VALID_ENCRYPTION_TYPE = 2,
-                      hash_name: str = 'sha512',
-                      cost=DEFAULT_COST,):
-        """
-        examples:
-        'sk=<base64key>#c2<key_b>#key2
-        Args:
-            hash_name: name of the given hashing algorithm, such as 'sha256'
-            token: token to base the key_b upon
-            key_b: key_b for bitwise encryption
-            prefix_b: encrypting format
-            cost: iterations
-            prefix_et: encryption type
-            key_cg: key_b for cryptographic encryption
-            nonce: nonce
-            prefix_rl: restriction level of key_b out of:
-        Returns:
-            '<security>=<base64 key_b>#<encrypted prefix_b+prefix_et+key_b>#<encrypted key2>'
-            sk means secure _key
-            ns means no security
-        """
-
-        if not 0 < key_b < 255:
-            raise ValueError("Invalid key_b", key_b)
-
-        if prefix_rl == 'sk':
-            # prefix_b defines the encryption of the final key_b components
-            # step1: encrypt the token using prefix_et, 1 or 2                                TO-DO:   done
-            # step2: derive key_b from it                                                     TO-DO:   done
-            # step3: encrypt key_cg, both prefixes using encryptbyprefix, with arg 'key_b'.   TO-DO:   done
-            # prefix_rl implemented, token implemented, key_b implemented,
-            # example: sk=<b64 key_b>#c2#<encrypted key_cg>
-            _encrypted_token = ToolKit.encryptbynumberform(token, key_cg, prefix_et, nonce)
-            fkey = pbkdf2_hmac(hash_name, _encrypted_token, b'', cost)  # key_b finalized
-
-            encrypted_cryptographic_key = ToolKit.encryptbyprefix(key_cg, prefix_b, key_b)
-            encrypted_prefixes = ToolKit.encryptbyprefix(prefix_b + str(prefix_et) + str(key_b), prefix_b, key_b)
-
-            return f"sk={b64encode(fkey).decode()}#{encrypted_prefixes}#{encrypted_cryptographic_key}"
-        elif prefix_rl == 'mk':
-            # **UNDER DEVELOPMENT**
-            # create a secure checksum algorithm that can generate new checksum formats, randomly
-            # create a sample id_ using the checksum, and put it in a format of:
-            # 'mk=<checksum hex>#<address>
-            # the checksum would be recognized and new ids could be made that's the point
-            # to make this a master _key and associate access to the private id_ and the checksum both
-            # so that a master _key owner could change the private _key and remain with the checksum to mass block
-            # _key owners obligated to him
-            fkey = None  # noqa
-            pass
-
-    @staticmethod
-    def verify_key_format(key: str):
-        possible_prefixes = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2']
-        prefix_b = None   # noqa
-        prefix_et = None  # noqa
-
-        if key.startswith('sk='):
-            pkey = key.split("#")
-            for i in ['a', 'b', 'c']:
-                if ToolKit.encryptbyprefix(pkey[1], i, operation='decrypt')[0] in possible_prefixes:
-                    prefix_b = None  # noqa  idk please help
-        pass
-
-    @staticmethod
-    def gen_key_domain(master_key: str, duplicates: int):  # noqa
-        if not master_key.startswith(("sk=", "ns=")):
-            raise ValueError("Key needs to be of type mk")
-        elif master_key.startswith("mk="):
-            pass
-
+    if isinstance(key, int):
+        raise TypeError("you mixed the key and prefix again")
+    if not len(key) == 32:
+        # I am too lazy to ensure this, but this is secure enough, it's just to encrypt parameters of the hash.
+        # So I don't care.
+        key = sha3_256(key).digest()
+    if number == 1:
+        if len(nonce) != 16:
+            raise ValueError("Nonce must be 16 bytes")
+        if operation == 'encrypt':
+            plaintext = AES.new(key, AES.MODE_CBC, nonce).encrypt(pad(data, AES.block_size))
+            return plaintext
         else:
-            raise ValueError("Invalid key")
+            plaintext = unpad(AES.new(key, AES.MODE_CBC, nonce).decrypt(data), AES.block_size)
+            return plaintext
+    else:
+        if len(nonce) != 12:
+            raise ValueError("Nonce must be 12 bytes")
+        if operation == 'encrypt':
+            plaintext = ChaCha20.new(key=key, nonce=nonce).encrypt(pad(data, ChaCha20.block_size))
+            return plaintext
+        else:
+            plaintext = unpad(ChaCha20.new(key=key, nonce=nonce).decrypt(data), ChaCha20.block_size)
+            return plaintext
 
 
-class ToolKit:
+def ROT(data: bytes, shift_amount: int, direction: Literal['left', 'right'] = 'right') -> bytes:
     """
-    things to do with bitwise encryption. idk how to call this class, but it isn't in the
-    ``bitwise.py`` file,
-    because im too lazy to change it all in all the files importing this
+    circular bit rotate
+    :param data: data to rotate
+    :param shift_amount: shift
+    :param direction: left or right
+    :return:
     """
-    # -------------------------------------------------------
-    #             bitwise encryption things
-    # -------------------------------------------------------
-    @staticmethod
-    def kexe(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
-        """stands for key embedded xor encryption"""
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        if operation == 'encrypt':
-            if key is None:
-                raise ValueError("Key is required for encryption.")
-            encrypted_bytes = bytes([b ^ key for b in data])
-            return b64encode((encrypted_bytes + bytes([key]))).decode()
-        elif operation == 'decrypt':
-            if key is not None:
-                raise ValueError("Key should not be provided for decryption, it will be extracted.")
-            encrypted_bytes = b64decode(data)
-            extracted_key = encrypted_bytes[-1]
-            decrypted_data = bytes([b ^ extracted_key for b in encrypted_bytes[:-1]])
-            return decrypted_data.decode('utf-8'), extracted_key
+    def rotate(byte: int, shift: int, _direction: str) -> int:
+        if _direction == 'left':
+            return ((byte << shift) | (byte >> (8 - shift))) & 0xFF
         else:
-            raise ValueError("Invalid operation")
+            return ((byte >> shift) | (byte << (8 - shift))) & 0xFF
+    return bytes(rotate(byte, shift_amount, direction) for byte in data)
 
-    @staticmethod
-    def keame(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
-        """stands for key embedded addmod encryption"""
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        if operation == 'encrypt':
-            if key is None:
-                raise ValueError("Key is required for encryption.")
-            # Convert data to bytes and encrypt
-            encrypted_bytes = bytes([(b + key) % 256 for b in data]) + bytes([key])
-            # Encode to Base64
-            return b64encode(encrypted_bytes).decode()
-        elif operation == 'decrypt':
-            if key is not None:
-                raise ValueError("Key should not be provided for decryption, it will be extracted.")
-            # Decode from Base64
-            encrypted_bytes = b64decode(data)
-            # Extract key_b
-            extracted_key = encrypted_bytes[-1]
-            # Decrypt data
-            decrypted_data = bytes([(b - extracted_key) % 256 for b in encrypted_bytes[:-1]])
-            return decrypted_data.decode('utf-8'), extracted_key
 
+def REV(byte_string: bytes):
+    """
+    reverses bytes such as byte of 10100001 will be 10000101, mirrored basically
+    """
+    reversed_bytes = bytearray()
+    for byte in byte_string:
+        reversed_byte = 0
+        for i in range(8):  # Since a byte has 8 bits
+            if byte & (1 << i):
+                reversed_byte |= (1 << (7 - i))  # Set the corresponding bit in reversed order
+        reversed_bytes.append(reversed_byte)
+    return bytes(reversed_bytes)
+
+
+def generate_key(key_type: str, length: int, base: int = 16):
+    """
+    Generates random keys by type.
+    Key of type `'nbase'` shall be set to bases: \n
+        10, 16, 32, 58, 64, 85,
+        all other will raise an error
+
+
+    :param length: length of desired key_b
+    :param base: used for nbase keys
+    :param key_type: type of the key_b, from: 'str', 'digit', 'bin', 'nbase'
+    :return: finalised key_b, matching key_b type
+    """
+
+    if base not in [10, 16, 32, 58, 64, 85]:
+        raise ValueError(f"Invalid base{base}")
+    charset = digits + ascii_letters + punctuation
+    gen_str_key = lambda _length: ''.join(choice(charset) for _ in range(length))
+    gen_digit_key = lambda _length: int(''.join(choice(digits) for _ in range(_length)))
+    gen_bin_key = lambda _length: ''.join(format(byte, '08b') for byte in urandom(_length))
+    gen_nbase_key = lambda _length, nbase: (lambda data: (lambda encoders: encoders.get(nbase, lambda: (_ for _ in ()))(data))({
+            10: lambda d: str(int.from_bytes(d, 'big')),
+            16: lambda d: d.hex(),
+            32: lambda d: b32e(d).decode('utf-8').rstrip('='),
+            58: lambda d: base58.b58encode(d).decode('utf-8'),
+            64: lambda d: b64e(d).decode('utf-8').rstrip('='),
+            85: lambda d: a85e(d).decode('utf-8').rstrip('=')}))(urandom(_length))
+
+    if key_type == "str":
+        return gen_str_key(length)
+    elif key_type == 'digit':
+        return gen_digit_key(length)
+    elif key_type == 'bin':
+        return gen_bin_key(length)
+    elif key_type == 'nbase':
+        return gen_nbase_key(length, base)
+    else:
+        raise ValueError("Invalid key type '%s'." % key_type)
+
+
+def process_id(username: str, email: str) -> str:
+    """
+    combines the username, and email to create an id template to later be passed through uuid5.
+    :return:
+    """
+
+    def monobyte_xor(data: Buffer, monobyte: int) -> bytes:
+        if not (0 <= monobyte < 256):
+            raise ValueError("monobyte must be between 0 and 255")
+        data = force_bytes(data)
+        return bytes(byte ^ monobyte for byte in data)
+
+    domains = email.split('@')
+    combined_domains = ''.join(domains).encode()
+    xored_username = monobyte_xor(username.encode(), (len(username) ** 2) % 256)
+    hashed_value = sha3_256(combined_domains + xored_username).digest()
+    half_length = len(hashed_value) // 2
+    first_half_int = int.from_bytes(hashed_value[:half_length], 'big')
+    second_half_int = int.from_bytes(hashed_value[half_length:], 'big')
+    combined_integer = (first_half_int & second_half_int) ^ (second_half_int | first_half_int)
+    byte_length = (combined_integer.bit_length() + 7) // 8
+    combined_bytes = combined_integer.to_bytes(byte_length, 'big')
+    base64_encoded = b64e(hmac.new(combined_bytes, hashed_value, sha3_512).digest()).decode()
+    return base64_encoded
+
+
+def process_sixbyte_v2(key: Buffer, sixbyte: T_sb, token: Buffer = None,
+                       base: Literal[16, 64, 'raw'] = 16,
+                       cost: int = DEFAULT_COST,
+                       salt_idx: bool = False,
+                       salt_size: int = 16) -> tuple[bytes, bytes]:
+    """
+    An auth function that uses a key and 6 bytes for 2factor authentication
+    :param key: key, length of 16 bytes, if ``token`` is provided the length must be 32 bytes.
+    :param sixbyte: tuple of 6 integers between 0-255
+    :param token: session token. a TOTP or HOTP used separately for each login session and transfer
+    :param base: base of the output, either 16 (default), base 64 or 'raw' - unencoded bytes.
+    :param cost: time cost, number of iterations.
+    :param salt_idx:
+    :param salt_size:
+    :return:
+    """
+    # make token a session token like a nonce but more of a
+    def monobyte_xor(data: Buffer, monobyte: int) -> bytes:
+        if not (0 <= monobyte < 256):
+            raise ValueError("monobyte must be between 0 and 255")
+        data = force_bytes(data)
+        return bytes(byte ^ monobyte for byte in data)
+
+    t_key = force_bytes(key)
+    salt = urandom(salt_size)
+    if not salt_idx:
+        salt = b''
+
+    if not token and not len(t_key) == 16:
+        raise ValueError("Key must be 16 characters long")
+    for i in sixbyte:
+        if not 0 <= i < 256:
+            raise ValueError(f"'{i}' must be a single byte integer")
+
+    # xor 4 times with the quadbytes
+    final_key = monobyte_xor(t_key + salt, sixbyte[0])
+    for i in sixbyte[1:]:
+        final_key = hmac.new(monobyte_xor(final_key, i), final_key+salt, sha3_512).digest()
+
+    if token:
+        if len(t_key) != 32:
+            raise ValueError("Key must be 32 characters long when using a token.")
+        dkey = hmac.new(final_key, token, sha3_512).digest()
+        U = dkey
+        for i in sixbyte:
+            dkey = hmac.new(monobyte_xor(token, (i+len(token)) % 256), dkey+salt, sha3_512).digest()
+            U = bytes(A ^ B for A, B in zip(dkey, U))
+        if cost >= 12:
+            dkey = pbkdf2_hmac("sha3_512", dkey, U+salt, cost-11)
         else:
-            raise ValueError("Invalid operation")
+            dkey = pbkdf2_hmac("sha3_512", dkey, U+salt, cost)
+        if base == 16:
+            return dkey.hex().encode(), salt
+        if base == 'raw':
+            return dkey, salt
+        return b64e(dkey), salt
 
-    @staticmethod
-    def kene(data: str | bytes, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
-        """stands for key embedded not encryption"""
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-
-        if operation == 'encrypt':
-            if key is None:
-                raise ValueError("Key is required for encryption.")
-            # Encrypt data
-            encrypted_bytes = bytes([~b & 0xFF for b in data]) + bytes([key])
-            # Encode to Base64
-            return b64encode(encrypted_bytes).decode()
-        elif operation == 'decrypt':
-            if key is not None:
-                raise ValueError("Key should not be provided for decryption, it will be extracted.")
-            # Decode from Base64
-            encrypted_bytes = b64decode(data)
-            # Extract key_b
-            extracted_key = encrypted_bytes[-1]
-            # Decrypt data
-            decrypted_data = bytes([~b & 0xFF for b in encrypted_bytes[:-1]])
-            return decrypted_data.decode('utf-8'), extracted_key
-
-        else:
-            raise ValueError("Invalid operation")
-
-    @classmethod
-    def encryptbyprefix(cls, data, prefix: VALID_PREFIX | str, key: int = None, operation: VALID_ENCRYPTION_OPERATION = 'encrypt') -> str | tuple[str, int]:
-        inst = cls
-        # prefix parameter also uses str to avoid type errors caused by expecting a Literal type.
-        if not isinstance(data, (str, bytes)):
-            raise TypeError(f"Invalid data type: {type(data)}")
-
-        if isinstance(prefix, str):
-            if prefix not in ['a', 'b', 'c']:
-                raise ValueError(f"Invalid prefix: {prefix}")
-
-        if operation == 'encrypt':
-            if key is None or key > 255:
-                raise ValueError("Key must be provided and be less than 256 for encryption.")
-
-            # Encryption logic
-            if prefix == 'a':
-                return inst.kexe(data, key, operation=operation)
-            elif prefix == 'b':
-                return inst.keame(data, key, operation=operation)
-            elif prefix == 'c':
-                return inst.kene(data, key, operation=operation)
-        elif operation == 'decrypt':
-            if key is not None:
-                raise ValueError("Key should not be provided for decryption, it will be extracted from the data.")
-
-            # Decryption logic
-            if prefix == 'a':
-                return inst.kexe(data, operation=operation)
-            elif prefix == 'b':
-                return inst.keame(data, operation=operation)
-            elif prefix == 'c':
-                return inst.kene(data, operation=operation)
-        else:
-            raise ValueError(f"Invalid operation: {operation}")
-
-    # what's up with the decryption, huh?
-    # no worries imma do it
-    @staticmethod
-    def encryptbynumberform(data: Buffer, key: Buffer,
-                            number: VALID_ENCRYPTION_TYPE, nonce: bytes = None,
-                            operation: VALID_ENCRYPTION_OPERATION = 'encrypt'):
-        """
-        :param operation: operation
-        :param data: data to encrypt
-        :param key: encryption key_b
-        :param nonce: nonce
-        :param number: encryption type: from 1, 2 translating to AES, ChaCha20 respectively
-        :return: encrypted text in bytes
-        """
-        kkey = key
-        if isinstance(key, int):
-            raise TypeError("you mixed the key and prefix again")
-        if not len(key) == 32:
-            kkey = sha3_256(key).digest()
-
-        if number == 1:
-            if len(nonce) != 16:
-                raise ValueError("Nonce must be 16 bytes")
-            if operation == 'encrypt':
-                plaintext = AES.new(kkey, AES.MODE_CBC, nonce).encrypt(pad(data, AES.block_size))
-                return plaintext
-            else:
-                plaintext = unpad(AES.new(kkey, AES.MODE_CBC, nonce).decrypt(data), AES.block_size)
-                return plaintext
-        else:
-            if len(nonce) != 12:
-                raise ValueError("Nonce must be 12 bytes")
-            if operation == 'encrypt':
-                plaintext = ChaCha20.new(key=kkey, nonce=nonce).encrypt(pad(data, ChaCha20.block_size))
-                return plaintext
-            else:
-                plaintext = unpad(ChaCha20.new(key=kkey, nonce=nonce).decrypt(data), ChaCha20.block_size)
-                return plaintext
-
-    # -------------------------------------------------------
-    #              bitwise logical operations
-    # -------------------------------------------------------
-
-    @staticmethod
-    def cbr(data: bytes, shift_amount: int, direction: str = 'left') -> bytes:
-        def rotate(byte: int, shift: int, _direction: str) -> int:
-            if _direction == 'left':
-                return ((byte << shift) | (byte >> (8 - shift))) & 0xFF
-            elif _direction == 'right':
-                return ((byte >> shift) | (byte << (8 - shift))) & 0xFF
-            else:
-                raise ValueError("Direction must be 'left' or 'right'")
-
-        return bytes(rotate(byte, shift_amount, direction) for byte in data)
-
-    @staticmethod
-    def reverse(byte_string: bytes):
-        """
-        reverses bytes such as byte of 10100001 will be 10000101, mirrored basically
-        """
-        reversed_bytes = bytearray()
-        for byte in byte_string:
-            reversed_byte = 0
-            for i in range(8):  # Since a byte has 8 bits
-                if byte & (1 << i):
-                    reversed_byte |= (1 << (7 - i))  # Set the corresponding bit in reversed order
-            reversed_bytes.append(reversed_byte)
-        return bytes(reversed_bytes)
-
-    @staticmethod
-    def maj(hex_list):
-        """average majority from array of 32 bit hexes"""
-        n = len(hex_list)
-        xor_result = 0
-        for i in range(n):
-            for j in range(i + 1, n):
-                # Compute AND operation for each pair
-                and_result = hex_list[i] & hex_list[j]
-                # XOR the result into the final result
-                xor_result ^= and_result
-        return xor_result & 0xFFFFFFFF
+    if cost >= 6:
+        dkey = pbkdf2_hmac('sha3_512', final_key, final_key+salt, cost-5)
+    else:
+        dkey = sha3_512(final_key+salt)
+    if base == 64:
+        return b64e(dkey), salt
+    return dkey.hex().encode(), salt
 
 
-class GeneralMethods:
-    # -------------------------------------------------------
-    #                 key and hash things
-    # -------------------------------------------------------
+class SeqRand:
+    def __init__(self, seed: bytes):
+        self._next = b''
+        self._og_seed = seed
+        self._current_seed = seed
+        self._rand = Random(self._og_seed)
 
-    # the difference between this and the formatted key_b is that this is purly random.
-    # but the formatted key_b is not random at all, and it's actually secure.
-    @staticmethod
-    def generate_key(key_type: str, length: int, base: int = 16):
-        """
-        Generates random keys by type.
-        Key of type `'nbase'` shall be set to bases: \n
-            10, 16, 32, 58, 64, 85,
-            all other will raise an error
+    __slots__ = "_next", "_og_seed", "_current_seed", "_rand"
 
+    def _derive_secondary_seed(self, seed: bytes):
+        randnums = []
+        for i in range(64):  # 64 pseudo random numbers
+            self._next = pbkdf2_hmac('sha3_512', self._og_seed, hmac.new(seed, self._next, 'sha3_256').digest(), 1)
+            self._rand.seed(self._next)
+            randnums.append(self._rand.random())
+        c1 = ''
+        for i in randnums:
+            c1 += str(i)
+        self._current_seed = pbkdf2_hmac('sha3_512', bytes(a ^ b for a, b in zip(c1.encode(), self._next)), hmac.new(seed, self._next, 'sha3_256').digest(), 1)
+        return self._current_seed
 
-        :param length: length of desired key_b
-        :param base: used for nbase keys
-        :param key_type: type of the key_b, from: 'str', 'digit', 'bin', 'nbase'
-        :return: finalised key_b, matching key_b type
-        """
+    def seed(self, key: bytes):
+        self._derive_secondary_seed(key)
+        self._rand.seed(self._current_seed)
 
-        if base not in [10, 16, 32, 58, 64, 85]:
-            raise ValueError(f"Invalid base{base}")
-        charset = digits + ascii_letters + punctuation
-        gen_str_key = lambda _length: ''.join(choice(charset) for _ in range(length))
-        gen_digit_key = lambda _length: int(''.join(choice(digits) for _ in range(_length)))
-        gen_bin_key = lambda _length: ''.join(format(byte, '08b') for byte in token_bytes(_length))
-        gen_nbase_key = lambda _length, nbase: (lambda data: (lambda encoders: encoders.get(nbase, lambda: (_ for _ in ()))(data))({
-                10: lambda d: str(int.from_bytes(d, 'big')),
-                16: lambda d: d.hex(),
-                32: lambda d: b32encode(d).decode('utf-8').rstrip('='),
-                58: lambda d: base58.b58encode(d).decode('utf-8'),
-                64: lambda d: b64encode(d).decode('utf-8').rstrip('='),
-                85: lambda d: a85encode(d).decode('utf-8').rstrip('='),
-            }))(token_bytes(_length))
-        if key_type == "str":
-            return gen_str_key(length)
-        elif key_type == 'digit':
-            return gen_digit_key(length)
-        elif key_type == 'bin':
-            return gen_bin_key(length)
-        elif key_type == 'nbase':
-            return gen_nbase_key(length, base)
-        else:
-            raise ValueError(f"Invalid key_b type '{key_type}'")
+    def _reseed(self):
+        self._next = self._current_seed
+        self._current_seed = self._derive_secondary_seed(self._next)
+        self._rand.seed(self._current_seed)
 
-    # imma delete it i think
-    @staticmethod
-    def customizable_hash(
-            data: Buffer,
-            _type: type,
-            hash_name: str,
-            encrypting_method: VALID_ENCRYPTION_TYPE | None = None,
-            nonce: bytes = None,
-            salt: str | ReadableBuffer | None = None):
-        """
+    def randint(self, a, b):
+        self._reseed()
+        return self._rand.randint(a, b)
 
-        :param data:
-        :param _type:
-        :param hash_name:
-        :param encrypting_method: encrypting with `Security.encryptbynumberform`
-        :param nonce:
-        :param salt: salt, if the algorithm is 'bcrypt' it will be ignored.
-        :return:
-        """
-        sterilized_data = refine_to_bytes(data)
-        if not salt:
-            salt = b''
-        else:
-            salt = salt.encode() if isinstance(salt, str) else salt
-        salted_password = sterilized_data + salt if salt else sterilized_data
+    def randrange(self, start: int, stop: int | None = None, step: int = 1):
+        self._reseed()
+        return self._rand.randrange(start, stop, step)
 
-        # Encrypting the password (if specified)
-        if encrypting_method:
-            key = token_bytes(16)
-            salted_password = ToolKit.encryptbynumberform(salted_password, key, encrypting_method, nonce)
-        hash_obj = new(hash_name)
-        hash_obj.update(salted_password)
-        hashed_result = hash_obj.digest()
-
-        if _type is str:
-            return hashed_result.hex()
-        elif _type is int:
-            return int.from_bytes(hashed_result, byteorder='big')
-        elif _type is bytes:
-            return hashed_result
-        else:
-            raise ValueError("Invalid type")
+    def random(self):
+        self._reseed()
+        return self._rand.random()
 
 
 if __name__ == "__main__":
-    x = ToolKit.encryptbynumberform(b'bro i swear imma quit im like a slave here', b'1234567890123456', 1, b'1234567890123456')
-    print(x.hex())
-    print(ToolKit.encryptbynumberform(x, b'1234567890123456', 1, b'1234567890123456', 'decrypt'))
+    sss = b'\x0f\xffB\xff\x0f\xe7M\xe2-\xc4S\x18\xe8}\xba\xe6\x8f\x11\x15K\xe2\x19\xd1$\x8d\x1e\xdd\xacxp\x13f'
+    sssss = Key("her", sss, b"hello world")
+    x = sssss.gen_key(sss)
+    print(b64e(x).decode())
+    y = input("x: ")
+    print(sssss.verify_key(b64d(y.encode()), sss))
+    print(y.encode())

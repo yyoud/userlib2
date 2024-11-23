@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
 from datetime import datetime
-# who tf invented circular imports I'll fucking put a fucking grenade in his ass
+# who tf invented circular imports I'll fucking put a fucking in his ass
 
 
 class _Error(Exception):
@@ -11,6 +11,7 @@ class _Error(Exception):
         super().__init__(self.message)
 
 
+# its own class for faster runtime
 class SuspiciousActivity(Exception):
     if TYPE_CHECKING:
         from Userlib.userlib import User
@@ -41,7 +42,7 @@ class SuspiciousActivity(Exception):
     # Linking it to a UserSpace can be a bit tricky, but I will resolve that in the future IDK
 
 
-class RequestDenied(_Error):
+class RequestDeniedException(_Error):
     """used for when a request to the database is denied. \n
     Meant to be for when someone tries to make the database crash; normally, if 2 or more requests per second,
     for a second or a fraction of it are detected, the user is banned."""
@@ -68,6 +69,10 @@ class RequestDenied(_Error):
 
         # Call the parent constructor with the complete message
         super().__init__(base_message)
+
+
+class SecurityWarning(Warning):
+    pass
 
 
 class FuckOffError(_Error):
