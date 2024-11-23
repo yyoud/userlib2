@@ -33,5 +33,5 @@ def register_100_users():
         yield User(username, email, password)
 ```
 
-#### I am only a begginer, and i am still learning myself. a lot of code here is going to be bullshit, but i have to learn someway.
-#### Although the code is mainly for learning purposes, feel free to copy/change/distribute the code, i dont care.
+#### I am only a begginer, and i am still learning. a lot of code here is going to be bullshit, but i have to learn someway.
+
